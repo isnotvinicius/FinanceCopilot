@@ -1,0 +1,48 @@
+# Credenciais: só o modelo .env.example é versionado
+.env
+.env.*
+!.env.example
+
+# Streamlit: segredos locais (o config.toml do projeto é versionado)
+.streamlit/secrets.toml
+
+# Bancos SQLite locais: dados financeiros e checkpoints do agente.
+# Recrie os dados de demonstração com: python -m finance_copilot.seed
+data/*
+!data/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Ambiente virtual
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Testes e ferramentas
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Logs
+*.log
+nohup.out
+
+# Editores e sistema operacional
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
