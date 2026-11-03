@@ -19,15 +19,15 @@ LangChain oferece as abstrações de alto nível (`create_agent`, tools, middlew
 
 ## 1. Chat model
 
-Um chat model recebe uma lista de mensagens e devolve uma `AIMessage`. O `init_chat_model` escolhe a classe certa pelo nome do provedor:
+Um chat model recebe uma lista de mensagens e devolve uma `AIMessage`. O `init_chat_model` escolhe a classe certa pelo nome do provedor (`ChatGroq`, `ChatGoogleGenerativeAI`, `ChatOllama`, `ChatOpenAI`...):
 
 ```python
-init_chat_model(settings.llm_model, model_provider=settings.llm_provider, ...)
+init_chat_model(spec.model, model_provider=provider.langchain_provider, **kwargs)
 ```
 
-**No código:** `finance_copilot/llm.py::build_chat_model`.
+**No código:** `finance_copilot/llm/factory.py::create_chat_model`. Antes de criar o modelo, `finance_copilot/llm/catalog.py::resolve_model` valida provedor, custo (`LLM_FREE_ONLY`) e suporte a tool calling. As diferenças entre provedores (timeout, retries, URL) ficam em `finance_copilot/llm/providers.py::PROVIDERS`.
 
-Como só esse arquivo conhece o provedor, trocar Anthropic por OpenAI é mudar o `.env`. `tests/test_llm.py::test_provider_is_selected_by_configuration` verifica isso.
+Como só o pacote `finance_copilot/llm/` conhece o provedor, trocar de Groq para Gemini é mudar o `.env`. `tests/test_llm.py::test_provider_is_selected_by_configuration` e `tests/test_llm.py::test_real_client_full_flow_with_approval` verificam isso. Detalhes de cada provedor: [LLM_PROVIDERS.md](LLM_PROVIDERS.md).
 
 ## 2. Mensagens
 
@@ -201,8 +201,10 @@ Middlewares interceptam o ciclo do agente em pontos definidos: `before_model`, `
 | `dynamic_prompt` (`_finance_system_prompt`) | Chamada ao modelo | Data e categorias atualizadas, mesmo em conversa retomada dias depois. Um prompt fixo teria a data errada |
 | `HumanInTheLoopMiddleware` | Depois do modelo | Pausa antes de qualquer escrita |
 | `ModelCallLimitMiddleware` | Antes e depois do modelo | Limita custo e impede laços |
-| `ModelRetryMiddleware` | Chamada ao modelo | Tolera falhas transitórias; não repete erros como chave inválida (`_is_transient`) |
+| `ModelRetryMiddleware` | Chamada ao modelo | Tolera falhas transitórias, no máximo 2 novas tentativas; não repete chave inválida, cota esgotada, falta de créditos nem rate limit com espera longa (`_is_transient`) |
 | `ToolErrorMiddleware` | Chamada à tool | Converte exceções em mensagens para o modelo, sem expor detalhes internos |
+| `wrap_model_call` (`_recover_rejected_tool_calls`) | Chamada ao modelo | O Groq recusa tool calls fora do schema com HTTP 400; a chamada volta ao fluxo normal para o modelo corrigir |
+| `after_model` (`_unique_tool_call_ids`) | Depois do modelo | Alguns provedores repetem ids de tool call; o id compõe a chave de idempotência das escritas |
 
 **No código:** `finance_copilot/agent/builder.py::build_agent`.
 
@@ -293,8 +295,9 @@ session = make_session(
 | Nível | Arquivo | Prova |
 |---|---|---|
 | Modelo roteirizado | `tests/test_agent.py` | Aprovação, duplicação, erros, memória |
-| Cliente real + servidor HTTP local | `tests/test_llm.py` | Serialização das tools e o ciclo completo com os clientes reais |
+| Cliente real + servidor HTTP local | `tests/test_llm.py` | Serialização das tools e o ciclo completo com os clientes reais dos 6 provedores |
 | Modelo real (`-m live`) | `tests/test_llm_live.py` | Escolha de tools e interpretação pelo modelo |
+| Smoke test real, sob demanda | `scripts/smoke_llm.py` | Poucas chamadas: texto, leitura, parâmetros estruturados, escrita aprovada |
 
 ## Roteiro de leitura do código
 

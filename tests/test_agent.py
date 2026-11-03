@@ -36,26 +36,6 @@ PIZZA = {
 }
 
 
-@pytest.fixture
-def checkpointer(tmp_path):
-    saver = open_checkpointer(tmp_path / "agent_state.db")
-    yield saver
-    saver.conn.close()
-
-
-@pytest.fixture
-def make_session(service, checkpointer):
-    def factory(*steps, **agent_kwargs):
-        model = scripted(*steps)
-        agent_kwargs.setdefault("model_retries", 0)
-        session = AgentSession(build_agent(model, checkpointer, **agent_kwargs), service)
-        session.model = model
-        session.graph = session._graph
-        return session
-
-    return factory
-
-
 def transaction_count(service) -> int:
     return service.list_transactions(TransactionFilter(limit=500)).total_count
 
@@ -583,3 +563,36 @@ def test_extraction_returns_validated_draft_and_does_not_write(service):
     assert draft.occurred_on == date(2026, 10, 14)
     assert transaction_count(service) == 0
     assert "2026-10-15" in model.calls[0][0].text
+
+
+def test_repeated_tool_call_ids_from_provider_do_not_block_new_writes(make_session, service):
+    """Alguns backends abertos (ex.: no pool do OpenRouter) repetem ids como 'call_0' a cada
+    turno. Como o id compõe a chave de idempotência, a 2ª despesa seria tratada como replay."""
+    second = {**PIZZA, "description": "Sushi", "amount": 120}
+    session = make_session(
+        call("create_transaction", call_id="call_0", **PIZZA),
+        reply("Registrado."),
+        call("create_transaction", call_id="call_0", **second),
+        reply("Registrado de novo."),
+    )
+    for text in ("Gastei 85 com pizza", "Gastei 120 com sushi"):
+        session.send(THREAD, text)
+        pending = session.pending_approval(THREAD)
+        session.decide(THREAD, pending.interrupt_id, approve=True)
+
+    assert transaction_count(service) == 2
+    ids = [c["id"] for m in session.graph.get_state({"configurable": {"thread_id": THREAD}}).values["messages"]
+           if isinstance(m, AIMessage) for c in m.tool_calls]
+    assert len(ids) == len(set(ids)) == 2
+
+
+def test_missing_tool_call_ids_are_filled(make_session, service):
+    message = calls(("get_financial_summary", {"start_month": "2026-10"}), ("get_category_summary", {"start_month": "2026-10"}))
+    for tool_call in message.tool_calls:
+        tool_call["id"] = ""
+    session = make_session(message, reply("Pronto."))
+
+    session.send(THREAD, "Resumo")
+
+    events = session.history(THREAD)[-1].tool_events
+    assert [e.status for e in events] == ["ok", "ok"]

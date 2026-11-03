@@ -13,8 +13,11 @@ from finance_copilot.service import FinanceService
 
 
 def extract_transaction_draft(
-    model: BaseChatModel, service: FinanceService, text: str
+    model: BaseChatModel, service: FinanceService, text: str, method: str | None = None
 ) -> TransactionDraft:
-    extractor = model.with_structured_output(TransactionDraft)
+    """`method` vem do catálogo de modelos: cada provedor suporta structured output de um jeito
+    (ex.: no Groq, o json_schema estrito exige todos os campos obrigatórios; tool calling não)."""
+    kwargs = {"method": method} if method else {}
+    extractor = model.with_structured_output(TransactionDraft, **kwargs)
     system = render_extraction_prompt(service.today(), service.list_categories())
     return extractor.invoke([SystemMessage(system), HumanMessage(text)])

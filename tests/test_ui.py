@@ -35,7 +35,7 @@ class Harness:
             graph = build_agent(model, open_checkpointer(self.tmp_path / "state.db"), model_retries=0)
             session = AgentSession(graph, self.service)
         app = App(Settings(_env_file=None), self.service, model, session, False)
-        self.monkeypatch.setattr("finance_copilot.ui.app.build_app", lambda: app)
+        self.monkeypatch.setattr("finance_copilot.ui.app.build_app", lambda *args, **kwargs: app)
         st.cache_resource.clear()
         at = AppTest.from_file(APP_FILE, default_timeout=30)
         at.run()
@@ -195,8 +195,11 @@ def test_manual_form_saves_once_and_updates_kpis(harness):
     assert harness.count() == 1
     assert metric(at, "Despesas") == "R$ 120,50"
     assert at.text_input(key="new_description").value == ""
+    # Aviso verde de sucesso, com o que foi salvo; some na interação seguinte.
+    assert [s.value for s in at.success] == ["Despesa de R$ 120,50 (Farmácia) registrada com sucesso."]
     at.run()
     assert harness.count() == 1
+    assert not at.success
 
 
 @pytest.mark.parametrize("amount", ["abc", "-5", "0", ""])
@@ -208,6 +211,7 @@ def test_manual_form_rejects_invalid_amount(harness, amount):
     assert not at.exception
     assert harness.count() == 0
     assert at.error
+    assert not at.success
     # O erro não apaga o que o usuário digitou.
     assert at.text_input(key="new_description").value == "Teste"
 
@@ -221,6 +225,7 @@ def test_salary_form_updates_income_without_creating_transaction(harness):
     assert not at.exception
     assert metric(at, "Receita total") == "R$ 5.000,00"
     assert harness.count() == 0
+    assert "Salário de R$ 5.000,00 salvo com sucesso" in at.success[0].value
 
 
 def test_delete_requires_confirmation(harness):
@@ -236,6 +241,7 @@ def test_delete_requires_confirmation(harness):
 
     assert not at.exception
     assert harness.count() == before - 1
+    assert "excluída com sucesso" in at.success[0].value
 
 
 def test_edit_requires_confirmation_then_updates(harness):
@@ -255,6 +261,7 @@ def test_edit_requires_confirmation_then_updates(harness):
 
     assert not at.exception
     assert harness.service.get_transaction(selected.id).amount.cents == 123
+    assert at.success[0].value == f"Movimentação #{selected.id} atualizada com sucesso."
 
 
 def test_quick_fill_only_prefills_form(harness):
@@ -275,3 +282,104 @@ def test_quick_fill_only_prefills_form(harness):
     assert at.text_input(key="new_amount").value == "32,90"
     assert at.text_input(key="new_description").value == "Uber"
     assert at.selectbox(key="new_category_expense").value == "Transporte"
+
+
+# --- Seleção de modelos -------------------------------------------------------------------------
+
+
+def free_spec(model: str = "openai/gpt-oss-120b"):
+    from finance_copilot.llm.catalog import find_model
+
+    return find_model(Settings(_env_file=None), "groq", model)
+
+
+def start_with(monkeypatch, app_for) -> AppTest:
+    """`app_for(settings)` monta o App de cada seleção, como o build_app real faria."""
+    monkeypatch.setattr("finance_copilot.ui.app.build_app", lambda settings=None, **kwargs: app_for(settings))
+    st.cache_resource.clear()
+    at = AppTest.from_file(APP_FILE, default_timeout=30)
+    at.run()
+    assert not at.exception
+    return at
+
+
+def test_blocked_paid_model_is_explained_and_chat_stays_off(tmp_path, monkeypatch):
+    from finance_copilot.bootstrap import build_app
+
+    settings = Settings(
+        _env_file=None,
+        llm_provider="anthropic",
+        llm_model="claude-sonnet-5-5",
+        anthropic_api_key="k",
+        finance_db_path=tmp_path / "f.db",
+        agent_state_db_path=tmp_path / "s.db",
+    )
+    real = build_app(settings)
+    at = start_with(monkeypatch, lambda s: real)
+
+    assert "LLM_FREE_ONLY=true" in "\n".join(i.value for i in at.info)
+    assert len(at.chat_input) == 0
+    # O modelo do .env aparece selecionado, sem troca silenciosa para um gratuito.
+    assert at.sidebar.selectbox[0].value == "anthropic"
+    # No modo gratuito, os modelos pagos não são oferecidos.
+    provider_options = at.sidebar.selectbox[0].options
+    assert "Anthropic" in provider_options  # só o configurado, para mostrar o motivo do bloqueio
+    at.sidebar.selectbox[0].set_value("groq").run()
+    assert all("Pago" not in option for option in at.sidebar.selectbox[1].options)
+
+
+def test_switching_model_starts_a_separate_conversation(harness, monkeypatch):
+    service = harness.service
+    checkpointer = open_checkpointer(harness.tmp_path / "state.db")
+
+    def app_for(settings):
+        settings = settings or Settings(_env_file=None)
+        spec = free_spec(settings.llm_model)
+        model = scripted(reply(f"Resposta do {settings.llm_model}."))
+        session = AgentSession(build_agent(model, checkpointer, model_retries=0), service)
+        return App(settings, service, model, session, False, spec)
+
+    at = start_with(monkeypatch, app_for)
+    assert "GPT-OSS 120B" in markdown_text(at)  # modelo ativo na barra lateral
+    at.chat_input[0].set_value("oi").run()
+    first_thread = at.query_params["thread"]
+    assert first_thread.startswith(free_spec().thread_scope)
+    assert "Resposta do openai/gpt-oss-120b." in markdown_text(at)
+
+    at.sidebar.selectbox[1].set_value("openai/gpt-oss-20b").run()
+    assert not at.exception
+    second_thread = at.query_params["thread"]
+    assert second_thread.startswith(free_spec("openai/gpt-oss-20b").thread_scope)
+    assert "Resposta do openai/gpt-oss-120b." not in markdown_text(at)
+
+    # Voltar ao modelo anterior traz a conversa dele de volta.
+    at.sidebar.selectbox[1].set_value("openai/gpt-oss-120b").run()
+    assert at.query_params["thread"] == first_thread
+    assert "Resposta do openai/gpt-oss-120b." in markdown_text(at)
+    checkpointer.conn.close()
+
+
+def test_quick_fill_uses_structured_output_method_from_catalog(harness, monkeypatch):
+    used = {}
+
+    def fake_extract(model, service, text, method=None):
+        used["method"] = method
+        raise RuntimeError("sem rede")
+
+    monkeypatch.setattr("finance_copilot.ui.forms.extract_transaction_draft", fake_extract)
+    model = scripted()
+    app = App(Settings(_env_file=None), harness.service, model, None, False, free_spec())
+    at = start_with(monkeypatch, lambda s: app)
+    next(t for t in at.text_input if t.label == "Preencher com IA").set_value("Uber 32,90")
+    next(b for b in at.button if b.label == "Preencher").click().run()
+
+    assert used["method"] == "function_calling"
+    assert "Preencha manualmente" in at.error[0].value
+
+
+def test_quick_fill_is_disabled_without_structured_output(harness, monkeypatch):
+    spec = free_spec().model_copy(update={"structured_output": "none"})
+    app = App(Settings(_env_file=None), harness.service, scripted(), None, False, spec)
+    at = start_with(monkeypatch, lambda s: app)
+    assert not [t for t in at.text_input if t.label == "Preencher com IA"]
+    assert any("não suporta structured output" in c.value for c in at.caption)

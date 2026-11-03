@@ -46,21 +46,20 @@ pip --python .venv/bin/python install pip
 cp .env.example .env
 ```
 
-Preencha no `.env` a chave do provedor escolhido. Para trocar de provedor, mude só o ambiente:
+O padrão é o **Groq no plano gratuito**. Crie uma chave em <https://console.groq.com/keys> e preencha:
 
 ```ini
-# Anthropic
-LLM_PROVIDER=anthropic
-LLM_MODEL=claude-sonnet-5-5
-ANTHROPIC_API_KEY=...
-
-# ou OpenAI: use um modelo disponível na sua conta que suporte tool calling
-LLM_PROVIDER=openai
-LLM_MODEL=<nome-do-modelo>
-OPENAI_API_KEY=...
+LLM_PROVIDER=groq
+LLM_MODEL=openai/gpt-oss-120b
+LLM_FREE_ONLY=true
+GROQ_API_KEY=gsk_...
 ```
 
-Sem chave, o dashboard e os lançamentos manuais funcionam normalmente; apenas o chat e o "Preencher com IA" ficam inativos.
+Provedores suportados: `groq`, `google_genai` (Gemini), `openrouter`, `ollama` (local, sem chave), `anthropic` e `openai`. Para trocar, mude só o `.env` ou escolha na barra lateral da aplicação. Como criar chaves gratuitas, modelos testados, limites e solução de erros: **[docs/LLM_PROVIDERS.md](docs/LLM_PROVIDERS.md)**.
+
+**Custo:** com `LLM_FREE_ONLY=true` (padrão), só os modelos marcados como gratuitos ou locais em `finance_copilot/llm/models.toml` podem ser usados; modelos pagos ou de custo não verificado são bloqueados, e o app nunca troca de modelo ou de provedor sozinho. Ainda assim, ele não controla o faturamento da sua conta no provedor: mantenha a conta na camada gratuita (sem cartão cadastrado, quando possível). Para usar Anthropic ou OpenAI de propósito, defina `LLM_FREE_ONLY=false`.
+
+Sem um modelo válido, o dashboard e os lançamentos manuais funcionam normalmente; apenas o chat e o "Preencher com IA" ficam inativos, com o motivo na tela.
 
 **Tracing (opcional):** defina `LANGSMITH_TRACING=true` e `LANGSMITH_API_KEY` no `.env`. As mensagens e os resultados das tools são enviados ao LangSmith quando o tracing está ligado.
 
@@ -77,7 +76,8 @@ Abra <http://localhost:8501>. Para recomeçar do zero, apague `data/finance.db` 
 
 ```bash
 .venv/bin/python -m pytest          # não usa rede nem credenciais
-.venv/bin/python -m pytest -m live  # usa a LLM real e consome créditos; exige chave no .env
+.venv/bin/python -m pytest -m live  # usa a LLM real e consome cota/créditos; exige chave no .env
+.venv/bin/python scripts/smoke_llm.py   # smoke test real e curto do modelo do .env (pede confirmação)
 ```
 
 | Arquivo | O que cobre |
@@ -85,7 +85,8 @@ Abra <http://localhost:8501>. Para recomeçar do zero, apague `data/finance.db` 
 | `tests/test_money.py` | Conversão e formatação de dinheiro |
 | `tests/test_service.py` | Saldo, categorias, comparações, simulações, validação, idempotência, seed |
 | `tests/test_agent.py` | Grafo real com LLM roteirizada: tools, aprovação, duplicação, erros, memória, structured output |
-| `tests/test_llm.py` | Clientes reais da Anthropic e da OpenAI contra um servidor HTTP local; configuração |
+| `tests/test_llm.py` | Clientes reais dos 6 provedores contra um servidor HTTP local (aprovação, 429, cota, 402); fábrica, catálogo e modo gratuito |
+| `tests/test_llm_errors.py` | Erros de cada SDK traduzidos em retry e mensagem ao usuário |
 | `tests/test_ui.py` | Página real do Streamlit via `AppTest`, incluindo o fluxo mínimo completo |
 | `tests/test_docs.py` | Arquivos e símbolos citados na documentação existem |
 | `tests/test_llm_live.py` | Escolha de tools por um modelo real (só com `-m live`) |
@@ -119,7 +120,12 @@ Abra <http://localhost:8501>. Para recomeçar do zero, apague `data/finance.db` 
 app.py                     Entrada do Streamlit
 finance_copilot/
 ├── config.py              Variáveis de ambiente, fuso, LangSmith
-├── llm.py                 init_chat_model: único ponto que conhece o provedor
+├── llm/                   Único ponto que conhece os provedores de LLM
+│   ├── factory.py         init_chat_model a partir da configuração
+│   ├── providers.py       Particularidades de cada provedor
+│   ├── catalog.py         Catálogo de modelos e política de custo (LLM_FREE_ONLY)
+│   ├── models.toml        Modelos, custo e recursos verificados
+│   └── errors.py          Rate limit, cota e outras falhas em mensagens claras
 ├── bootstrap.py           Monta os objetos da aplicação
 ├── money.py               Centavos, parsing e formatação em BRL
 ├── schemas.py             Entradas e resultados dos serviços (Pydantic)
@@ -137,7 +143,8 @@ finance_copilot/
 │   ├── context.py         Contexto de execução
 │   ├── session.py         Fronteira entre interface e grafo
 │   └── extraction.py      Structured output do preenchimento rápido
-└── ui/                    Página, gráficos, formulários e chat
+└── ui/                    Página, gráficos, formulários, chat e seleção de modelo
+scripts/smoke_llm.py       Smoke test opcional com a API real
 tests/                     Testes automatizados
 docs/                      Documentação abaixo
 ```
@@ -145,5 +152,6 @@ docs/                      Documentação abaixo
 ## Documentação
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): arquitetura, fluxos e decisões
+- [docs/LLM_PROVIDERS.md](docs/LLM_PROVIDERS.md): provedores de LLM, planos gratuitos, limites e smoke tests
 - [docs/LANGCHAIN_GUIDE.md](docs/LANGCHAIN_GUIDE.md): conceitos de LangChain e LangGraph, apontando para o código
 - [docs/INTERVIEW.md](docs/INTERVIEW.md): guia de estudo para a entrevista e roteiro de demonstração

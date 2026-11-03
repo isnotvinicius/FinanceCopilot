@@ -19,7 +19,7 @@ flowchart TB
         Tools["9 tools @tool<br/>agent/tools.py"]
     end
 
-    LLM["Provedor de LLM<br/>Anthropic ou OpenAI"]
+    LLM["Provedor de LLM<br/>Groq, Gemini, OpenRouter, Ollama,<br/>Anthropic ou OpenAI (llm/)"]
     Service["FinanceService<br/>service.py: regras e cálculos"]
     Repo["Repository<br/>repository.py: SQL parametrizado"]
     FinDB[("finance.db<br/>dados financeiros")]
@@ -154,6 +154,8 @@ As regras não dependem do prompt:
 | Prompt injection em descrições | Mesmo se o modelo obedecer a um texto malicioso, a escrita ainda passa pela aprovação e pela validação |
 | Laço infinito ou custo | `ModelCallLimitMiddleware` limita a 10 chamadas por execução |
 | Falha da LLM | `ModelRetryMiddleware` e tratamento em `finance_copilot/agent/session.py::_run`; a tela mostra uma mensagem amigável |
+| Gasto inesperado com API | `LLM_FREE_ONLY=true` só aceita modelos free/local do catálogo; sem fallback nem troca automática de provedor; retries limitados (`finance_copilot/llm/catalog.py::resolve_model`) |
+| Rate limit ou cota do plano gratuito | `finance_copilot/llm/errors.py::classify_llm_error` decide se vale tentar de novo e explica o motivo ao usuário |
 | Falha do banco | `finance_copilot/agent/builder.py::_tool_error_message` devolve uma mensagem sem detalhes internos |
 | Credenciais | Só em `.env`, ignorado pelo Git; os testes não precisam delas |
 

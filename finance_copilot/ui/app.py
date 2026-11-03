@@ -3,7 +3,7 @@
 import streamlit as st
 
 from finance_copilot.bootstrap import App, build_app
-from finance_copilot.ui import dashboard, forms
+from finance_copilot.ui import dashboard, forms, model_picker
 from finance_copilot.ui.chat import render_chat
 
 
@@ -13,9 +13,20 @@ def _get_app() -> App:
     return build_app()
 
 
+@st.cache_resource(show_spinner=False)
+def _get_app_for(provider: str, model: str) -> App:
+    """Modelo escolhido na barra lateral. Reaproveita o serviço: os dados são os mesmos."""
+    base = _get_app()
+    return build_app(base.settings.with_llm(provider, model), service=base.service)
+
+
 def main() -> None:
     st.set_page_config(page_title="Finance Copilot", page_icon="💰", layout="wide")
-    app = _get_app()
+    base = _get_app()
+    selection = model_picker.choose_model(base.settings)
+    configured = (base.settings.llm_provider, base.settings.llm_model)
+    app = base if selection == configured else _get_app_for(*selection)
+    model_picker.render_status(app)
 
     flash = st.session_state.pop("flash", None)
     if flash:

@@ -26,7 +26,7 @@ Com a API direta, eu mesmo escreveria o laço de tool calling, a conversão de s
 | Sem framework | Neste projeto |
 |---|---|
 | Laço manual de tool calling | `create_agent` |
-| Formato diferente por provedor | `init_chat_model`: mudança apenas no `.env` |
+| Formato diferente por provedor | `init_chat_model`: mudança apenas no `.env` (6 provedores, veja [LLM_PROVIDERS.md](LLM_PROVIDERS.md)) |
 | Tabela própria de histórico | `SqliteSaver` |
 | Máquina de estados de aprovação | `HumanInTheLoopMiddleware` + `interrupt` |
 | Instrumentação manual | LangSmith por variáveis de ambiente |
@@ -94,7 +94,7 @@ Reduzo o espaço onde uma alucinação pode acontecer:
 
 **Verificação:**
 
-- O fluxo foi testado com LLM roteirizada e com os clientes reais contra um servidor local. **`tests/test_llm_live.py` ainda não foi executado contra um modelo real no ambiente de desenvolvimento**, porque não havia chave disponível. Rode antes da demonstração.
+- O fluxo foi testado com LLM roteirizada e com os clientes reais de todos os provedores contra um servidor local. Com a API real, o Groq (`openai/gpt-oss-120b`) passou no `scripts/smoke_llm.py` em 03/11/2026; os demais provedores e o `tests/test_llm_live.py` completo ainda não foram executados contra a API real.
 - A integração com o serviço LangSmith também não foi exercitada de ponta a ponta, só a lógica que a ativa.
 
 **Funcionais:**
@@ -112,7 +112,8 @@ Reduzo o espaço onde uma alucinação pode acontecer:
 
 - O histórico cresce sem resumo. Uma conversa muito longa pode estourar o limite do modelo; "Nova conversa" contorna isso. O arquivo de checkpoints também não é limpo.
 - Duas abas na mesma conversa são protegidas contra gravação duplicada, mas podem exibir um estado momentaneamente desatualizado.
-- A idempotência assume que o provedor gera `tool_call_id` único dentro de uma conversa, o que vale para os dois provedores suportados, conforme os formatos que eles usam.
+- A idempotência usa o `tool_call_id`. Como alguns provedores repetem ou omitem esse id, `finance_copilot/agent/builder.py::_unique_tool_call_ids` substitui ids ausentes ou repetidos antes da aprovação.
+- Nos planos gratuitos, os limites por minuto são apertados (Groq: 8K tokens/min, cerca de uma pergunta com ferramenta por minuto). O app avisa e não insiste, mas a demonstração precisa de pausas.
 - Mensagens e dados vão para o provedor de LLM e, se ligado, para o LangSmith. Por isso, apenas dados fictícios.
 - Aplicação local, sem autenticação, de usuário único.
 - Tema claro fixo.

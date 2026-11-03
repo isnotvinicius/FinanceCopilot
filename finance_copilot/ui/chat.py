@@ -28,12 +28,23 @@ _SUGGESTIONS = (
 )
 
 
-def _thread_id() -> str:
-    """A conversa fica na URL: ao recarregar a página, o checkpoint restaura tudo."""
+def _thread_scope(app: App) -> str:
+    return f"{app.model_spec.thread_scope}-" if app.model_spec else ""
+
+
+def _thread_id(scope: str) -> str:
+    """A conversa fica na URL: ao recarregar a página, o checkpoint restaura tudo.
+
+    Cada modelo tem as próprias conversas (o prefixo identifica o modelo). Trocar de modelo
+    não continua o histórico de outro, nem uma aprovação pendente criada por ele. Ao voltar
+    ao modelo anterior, a conversa dele reaparece.
+    """
+    last_threads = st.session_state.setdefault("threads_by_model", {})
     thread_id = st.query_params.get("thread")
-    if not thread_id:
-        thread_id = uuid4().hex
+    if not thread_id or not thread_id.startswith(scope):
+        thread_id = last_threads.get(scope) or f"{scope}{uuid4().hex}"
         st.query_params["thread"] = thread_id
+    last_threads[scope] = thread_id
     return thread_id
 
 
@@ -42,16 +53,19 @@ def render_chat(app: App) -> None:
     title_col.subheader("Copilot", anchor=False)
     session = app.session
     if session is None:
-        st.info(
+        reason = app.llm_error or (
             f"O chat precisa de uma chave de API para o provedor '{app.settings.llm_provider}'. "
-            "Copie `.env.example` para `.env`, preencha a chave e reinicie. "
-            "O dashboard e os lançamentos manuais funcionam normalmente sem ela."
+            "Copie `.env.example` para `.env`, preencha a chave e reinicie."
+        )
+        st.info(
+            f"{reason}\n\nO dashboard e os lançamentos manuais funcionam normalmente sem o chat."
         )
         return
 
-    thread_id = _thread_id()
+    scope = _thread_scope(app)
+    thread_id = _thread_id(scope)
     if button_col.button("Nova conversa", width="stretch"):
-        st.query_params["thread"] = uuid4().hex
+        st.query_params["thread"] = f"{scope}{uuid4().hex}"
         st.rerun()
 
     pending = session.pending_approval(thread_id)

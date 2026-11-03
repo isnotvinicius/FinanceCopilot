@@ -18,6 +18,7 @@ def test_expected_documents_exist():
         "ARCHITECTURE.md",
         "LANGCHAIN_GUIDE.md",
         "INTERVIEW.md",
+        "LLM_PROVIDERS.md",
     }
 
 

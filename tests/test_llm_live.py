@@ -1,7 +1,11 @@
 """Avaliação com o modelo real: confere se a LLM escolhe as tools certas e não inventa valores.
 
-Sem chave de API, estes testes são pulados. Para rodar (consome créditos do provedor):
+Sem um modelo válido no .env (chave ausente, modelo bloqueado por LLM_FREE_ONLY etc.), estes
+testes são pulados com o motivo. Para rodar (consome cota ou créditos do provedor configurado):
     .venv/bin/python -m pytest -m live -v
+
+Em planos gratuitos com limite por minuto (Groq: 8K tokens/min), prefira scripts/smoke_llm.py,
+que faz poucas chamadas e espera entre elas.
 """
 
 from datetime import date
@@ -12,15 +16,26 @@ from finance_copilot.agent.builder import build_agent, open_checkpointer
 from finance_copilot.agent.session import AgentSession
 from finance_copilot.config import Settings
 from finance_copilot.database import Database
-from finance_copilot.llm import build_chat_model
+from finance_copilot.llm import LLMConfigurationError, build_chat_model
 from finance_copilot.schemas import TransactionFilter
 from finance_copilot.seed import seed
 from finance_copilot.service import FinanceService
 
 settings = Settings()
+
+
+def _configuration_problem() -> str | None:
+    try:
+        build_chat_model(settings)
+    except LLMConfigurationError as exc:
+        return str(exc)
+    return None
+
+
+SKIP_REASON = _configuration_problem()
 pytestmark = [
     pytest.mark.live,
-    pytest.mark.skipif(not settings.llm_configured, reason="sem chave de API de LLM"),
+    pytest.mark.skipif(SKIP_REASON is not None, reason=f"LLM indisponível: {SKIP_REASON}"),
 ]
 
 TODAY = date(2026, 10, 15)

@@ -14,7 +14,8 @@ from pydantic import ValidationError
 from finance_copilot.agent.extraction import extract_transaction_draft
 from finance_copilot.bootstrap import App
 from finance_copilot.errors import FinanceError
-from finance_copilot.money import parse_money, to_cents
+from finance_copilot.llm.errors import classify_llm_error
+from finance_copilot.money import format_brl, parse_money, to_cents
 from finance_copilot.schemas import (
     TransactionChanges,
     TransactionFilter,
@@ -36,11 +37,22 @@ def _form_key(name: str) -> str:
     return st.session_state[state_key]
 
 
-def _finish_form(name: str, message: str) -> None:
-    """Depois de um sucesso: nova chave para o próximo envio e recarga dos indicadores."""
+def _finish_form(name: str, message: str, section: str) -> None:
+    """Depois de um sucesso: nova chave para o próximo envio e recarga dos indicadores.
+
+    A mensagem aparece na seção onde o usuário salvou (ver _show_success), após o rerun.
+    """
     st.session_state.pop(f"idempotency_{name}", None)
-    st.session_state["flash"] = message
+    st.session_state["form_success"] = (section, message)
     st.rerun()
+
+
+def _show_success(section: str) -> None:
+    """Aviso verde de confirmação, exibido uma única vez na seção que salvou."""
+    saved = st.session_state.get("form_success")
+    if saved and saved[0] == section:
+        del st.session_state["form_success"]
+        st.success(saved[1], icon="✅")
 
 
 def _error_text(exc: Exception) -> str:
@@ -60,6 +72,7 @@ def _parse_amount(text: str) -> int:
 
 
 def render_history(service: FinanceService, month: str) -> None:
+    _show_success("history")
     start_default, end_default = month_bounds(month)
     start_col, end_col, category_col, kind_col = st.columns(4)
     # A chave inclui o mês para que o filtro acompanhe o mês selecionado no topo.
@@ -161,7 +174,7 @@ def _render_edit_form(service: FinanceService, item: TransactionView) -> None:
     except (FinanceError, ValidationError) as exc:
         st.error(_error_text(exc))
         return
-    _finish_form(f"edit_{item.id}", f"Movimentação #{item.id} atualizada.")
+    _finish_form(f"edit_{item.id}", f"Movimentação #{item.id} atualizada com sucesso.", "history")
 
 
 def _render_delete(service: FinanceService, item: TransactionView) -> None:
@@ -172,7 +185,7 @@ def _render_delete(service: FinanceService, item: TransactionView) -> None:
         except FinanceError as exc:
             st.error(str(exc))
             return
-        _finish_form(f"delete_{item.id}", f"Movimentação #{item.id} excluída.")
+        _finish_form(f"delete_{item.id}", f"Movimentação #{item.id} excluída com sucesso.", "history")
 
 
 # --- Novo lançamento ------------------------------------------------------------------------
@@ -183,6 +196,7 @@ def render_new_transaction(app: App) -> None:
     if st.session_state.pop("new_form_saved", False):
         for key in ("new_amount", "new_description", "new_date"):
             st.session_state.pop(key, None)
+    _show_success("new")
     _render_quick_fill(app)
     kind = st.radio(
         "Tipo", list(KIND_LABELS), format_func=KIND_LABELS.get, horizontal=True, key="new_kind"
@@ -200,10 +214,11 @@ def render_new_transaction(app: App) -> None:
     if not submitted:
         return
     try:
+        amount_cents = _parse_amount(amount)
         service.create_transaction(
             TransactionInput(
                 kind=kind,
-                amount_cents=_parse_amount(amount),
+                amount_cents=amount_cents,
                 description=description,
                 category=category,
                 occurred_on=occurred_on,
@@ -215,12 +230,20 @@ def render_new_transaction(app: App) -> None:
         st.error(_error_text(exc))
         return
     st.session_state["new_form_saved"] = True
-    _finish_form("new", f"{KIND_LABELS[kind]} registrada.")
+    _finish_form(
+        "new",
+        f"{KIND_LABELS[kind]} de {format_brl(amount_cents)} ({description.strip()}) registrada com sucesso.",
+        "new",
+    )
 
 
 def _render_quick_fill(app: App) -> None:
     """Structured output: a LLM preenche os campos, e nada é salvo sem o clique do usuário."""
     if app.model is None:
+        return
+    spec = app.model_spec
+    if spec is not None and not spec.supports_structured_output:
+        st.caption("Preencher com IA indisponível: o modelo ativo não suporta structured output.")
         return
     with st.form("quick_fill", border=False):
         text_col, button_col = st.columns([4, 1], vertical_alignment="bottom")
@@ -230,9 +253,11 @@ def _render_quick_fill(app: App) -> None:
         return
     try:
         with st.spinner("Lendo o texto..."):
-            draft = extract_transaction_draft(app.model, app.service, text)
-    except Exception:
-        st.error("Não foi possível interpretar o texto agora. Preencha manualmente.")
+            method = spec.structured_output_method if spec else None
+            draft = extract_transaction_draft(app.model, app.service, text, method=method)
+    except Exception as exc:
+        detail = classify_llm_error(exc).message
+        st.error(f"Não foi possível interpretar o texto agora. Preencha manualmente. {detail or ''}")
         return
     _apply_draft(app.service, draft)
 
@@ -256,6 +281,7 @@ def _apply_draft(service: FinanceService, draft) -> None:
 
 
 def render_salary(service: FinanceService, month: str) -> None:
+    _show_success("salary")
     current = service.get_salary(month)
     st.caption(
         "O salário é uma receita recorrente da configuração: entra uma vez em cada mês e não "
@@ -272,10 +298,9 @@ def render_salary(service: FinanceService, month: str) -> None:
         st.warning("Marque a confirmação para salvar.")
         return
     try:
-        service.set_monthly_salary(
-            _parse_amount(amount), effective_from=month, idempotency_key=_form_key("salary")
-        )
+        cents = _parse_amount(amount)
+        service.set_monthly_salary(cents, effective_from=month, idempotency_key=_form_key("salary"))
     except FinanceError as exc:
         st.error(str(exc))
         return
-    _finish_form("salary", "Salário atualizado.")
+    _finish_form("salary", f"Salário de {format_brl(cents)} salvo com sucesso a partir de {month}.", "salary")

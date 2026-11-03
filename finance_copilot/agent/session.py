@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langgraph.types import Command
 
 from finance_copilot.agent.context import AgentContext
+from finance_copilot.llm.errors import classify_llm_error
 from finance_copilot.service import FinanceService
 
 logger = logging.getLogger(__name__)
@@ -186,7 +187,7 @@ class AgentSession:
             self._graph.invoke(
                 graph_input, self._config(thread_id), context=self._context, version="v2"
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Falha ao executar o agente na conversa %s", thread_id)
-            return TurnResult(error=AGENT_FAILURE_MESSAGE)
+            return TurnResult(error=classify_llm_error(exc).message or AGENT_FAILURE_MESSAGE)
         return TurnResult()

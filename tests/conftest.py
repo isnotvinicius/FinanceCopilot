@@ -5,9 +5,12 @@ from datetime import date
 
 import pytest
 
+from finance_copilot.agent.builder import build_agent, open_checkpointer
+from finance_copilot.agent.session import AgentSession
 from finance_copilot.database import Database
 from finance_copilot.schemas import TransactionInput
 from finance_copilot.service import FinanceService
+from tests.fakes import scripted
 
 os.environ["LANGSMITH_TRACING"] = "false"
 
@@ -44,3 +47,24 @@ class Builder:
 @pytest.fixture
 def builder(service) -> Builder:
     return Builder(service)
+
+
+@pytest.fixture
+def checkpointer(tmp_path):
+    saver = open_checkpointer(tmp_path / "agent_state.db")
+    yield saver
+    saver.conn.close()
+
+
+@pytest.fixture
+def make_session(service, checkpointer):
+    """Sessão do agente real com a LLM roteirizada (tests/fakes.py)."""
+    def factory(*steps, **agent_kwargs):
+        model = scripted(*steps)
+        agent_kwargs.setdefault("model_retries", 0)
+        session = AgentSession(build_agent(model, checkpointer, **agent_kwargs), service)
+        session.model = model
+        session.graph = session._graph
+        return session
+
+    return factory

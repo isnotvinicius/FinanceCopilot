@@ -1,0 +1,206 @@
+# Catálogo de modelos do Finance Copilot.
+#
+# É a ÚNICA lista de modelos aceita com LLM_FREE_ONLY=true: um modelo fora daqui, ou com
+# cost = "paid" ou "unknown", é bloqueado. Nada é deduzido do nome do provedor.
+#
+# cost:      free  = gratuito na camada free do provedor, conforme a documentação em checked_on
+#            local = roda na sua máquina (Ollama), sem cobrança por token
+#            paid  = cobra por token
+# "free" NÃO é uma garantia permanente: preços, limites e modelos mudam. Confira o provedor antes
+# de usar e veja docs/LLM_PROVIDERS.md. O app não controla o faturamento da sua conta externa.
+#
+# tool_calling:        o agente só funciona com true.
+# parallel_tool_calls: o modelo pode pedir várias ferramentas na mesma resposta. Com false, o
+#                      agente ainda funciona, chamando uma ferramenta por vez (mais chamadas).
+# structured_output:   método do "Preencher com IA": function_calling | json_schema | json_mode |
+#                      default (padrão da integração) | none (desativa o recurso).
+# options:             argumentos extras do cliente LangChain, por modelo.
+# tested:              "mock" = testado só com servidor simulado; "live" = validado com a API real.
+
+# --- Groq (camada gratuita do GroqCloud) ------------------------------------------------------
+# Fonte: console.groq.com/docs/tool-use, /structured-outputs e /rate-limits.
+# Llama 3.x, qwen3-32b e kimi-k2 foram desativados para contas free/developer em 2026.
+
+[[models]]
+provider = "groq"
+model = "openai/gpt-oss-120b"
+label = "GPT-OSS 120B"
+cost = "free"
+recommended = true
+tool_calling = true
+parallel_tool_calls = false
+structured_output = "function_calling"
+checked_on = 2026-11-03
+tested = "live"  # scripts/smoke_llm.py: 5/5 passos em 03/11/2026
+notes = "Free: 30 req/min, 1.000 req/dia, 8K tokens/min, 200K tokens/dia. Cada turno com ferramenta usa ~7K tokens: espere ~1 pergunta por minuto."
+
+[[models]]
+provider = "groq"
+model = "openai/gpt-oss-20b"
+label = "GPT-OSS 20B"
+cost = "free"
+tool_calling = true
+parallel_tool_calls = false
+structured_output = "function_calling"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "Mais rápido e menos preciso que o 120B. Mesmos limites gratuitos."
+
+# --- Google Gemini (camada gratuita da Gemini API) --------------------------------------------
+# Fonte: ai.google.dev/gemini-api/docs/pricing e /deprecations. Na camada gratuita o Google pode
+# usar o conteúdo enviado para melhorar seus produtos: use só dados fictícios.
+
+[[models]]
+provider = "google_genai"
+model = "gemini-3.5-flash-lite"
+label = "Gemini 3.5 Flash-Lite"
+cost = "free"
+recommended = true
+tool_calling = true
+parallel_tool_calls = true
+structured_output = "json_schema"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "Sem data de desligamento anunciada. Substituto oficial do gemini-2.5-flash."
+
+[[models]]
+provider = "google_genai"
+model = "gemini-3.6-flash"
+label = "Gemini 3.6 Flash"
+cost = "free"
+tool_calling = true
+parallel_tool_calls = true
+structured_output = "json_schema"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "Mais capaz que o Flash-Lite, com cota gratuita menor."
+
+[[models]]
+provider = "google_genai"
+model = "gemini-2.5-flash"
+label = "Gemini 2.5 Flash (desligamento em 01/12/2026)"
+cost = "free"
+tool_calling = true
+parallel_tool_calls = true
+structured_output = "json_schema"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "A partir de 01/12/2026 as chamadas serão redirecionadas ao gemini-3.5-flash-lite."
+
+[[models]]
+provider = "google_genai"
+model = "gemini-2.5-flash-lite"
+label = "Gemini 2.5 Flash-Lite (contas antigas)"
+cost = "free"
+tool_calling = true
+parallel_tool_calls = true
+structured_output = "json_schema"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "Disponível apenas para quem já usava o modelo; contas novas devem usar o 3.5 Flash-Lite."
+
+# --- OpenRouter (modelos :free) -------------------------------------------------------------
+# Fonte: openrouter.ai/docs/api-reference/limits e GET /api/v1/models. Free: 20 req/min e 50
+# req/dia (1.000/dia após comprar US$ 10 em créditos). Só openrouter/free e IDs terminados em
+# ":free" podem ter cost = "free"; o carregamento do catálogo rejeita o contrário.
+
+[[models]]
+provider = "openrouter"
+model = "openrouter/free"
+label = "Free Models Router (aleatório)"
+cost = "free"
+recommended = true
+tool_calling = true
+parallel_tool_calls = false
+structured_output = "function_calling"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "Escolhe um modelo gratuito por requisição, entre os que aceitam ferramentas: o comportamento varia entre chamadas."
+
+[[models]]
+provider = "openrouter"
+model = "google/gemma-4-31b-it:free"
+label = "Gemma 4 31B (free)"
+cost = "free"
+tool_calling = true
+parallel_tool_calls = false
+structured_output = "function_calling"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "Anuncia suporte a tools em /api/v1/models. A lista de modelos :free muda com frequência."
+
+[[models]]
+provider = "openrouter"
+model = "nvidia/nemotron-3-ultra-550b-a55b:free"
+label = "Nemotron 3 Ultra (free)"
+cost = "free"
+tool_calling = true
+parallel_tool_calls = false
+structured_output = "function_calling"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "Anuncia suporte a tools em /api/v1/models. A lista de modelos :free muda com frequência."
+
+# --- Ollama (local) -------------------------------------------------------------------------
+# Baixe antes com "ollama pull <modelo>". Modelos "-cloud" do Ollama rodam fora da sua máquina
+# e não podem ser marcados como local.
+
+[[models]]
+provider = "ollama"
+model = "qwen3:8b"
+label = "Qwen3 8B"
+cost = "local"
+recommended = true
+tool_calling = true
+parallel_tool_calls = true
+structured_output = "json_schema"
+options = { reasoning = true }
+checked_on = 2026-11-03
+tested = "mock"
+notes = "~5 GB. reasoning=true separa o raciocínio da resposta exibida."
+
+[[models]]
+provider = "ollama"
+model = "llama3.1:8b"
+label = "Llama 3.1 8B"
+cost = "local"
+tool_calling = true
+parallel_tool_calls = true
+structured_output = "json_schema"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "~5 GB. Mais fraco em escolher ferramentas que o Qwen3."
+
+[[models]]
+provider = "ollama"
+model = "gpt-oss:20b"
+label = "GPT-OSS 20B"
+cost = "local"
+tool_calling = true
+parallel_tool_calls = false
+structured_output = "json_schema"
+checked_on = 2026-11-03
+tested = "mock"
+notes = "~14 GB; precisa de 16 GB de memória."
+
+# --- Pagos (bloqueados com LLM_FREE_ONLY=true) ----------------------------------------------
+
+[[models]]
+provider = "anthropic"
+model = "claude-sonnet-5-5"
+label = "Claude Sonnet 5.5"
+cost = "paid"
+tool_calling = true
+parallel_tool_calls = true
+structured_output = "default"
+tested = "mock"
+
+[[models]]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+label = "Claude Haiku 5.5"
+cost = "paid"
+tool_calling = true
+parallel_tool_calls = true
+structured_output = "default"
+tested = "mock"
